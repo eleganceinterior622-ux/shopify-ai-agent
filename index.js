@@ -9,76 +9,76 @@ app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-const tools = [
-  {
-    functionDeclarations: [
-      {
-        name: "addToCart",
-        description: "Customer ke cart mein product add karta hai jab wo khareedne ko kahe.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            variantId: { type: "STRING", description: "Shopify product variant ID" },
-            productName: { type: "STRING", description: "Product ka naam" }
-          },
-          required: ["variantId", "productName"]
-        }
-      },
-      {
-        name: "goToCheckout",
-        description: "Jab customer bole checkout ya order final karna hai.",
-        parameters: { type: "OBJECT", properties: {} }
-      }
-    ]
-  }
-];
-
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, storeProducts } = req.body;
 
-    // gemini-3.6-flash model use ho raha hai (gemini-1.5-flash current API version par deprecated hai)
-    const model = genAI.getGenerativeModel({
-      model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
-      tools: tools
-    });
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
 
-    const systemPrompt = `Aap Elegance Antique Store ke helpful shopping assistant hain.
-Customer se Roman Urdu ya English me baat karein.
-Store ke live products: ${JSON.stringify(storeProducts || [])}
+    const systemPrompt = `Aap Elegance Antique Store ke helpful aur respectful store consultant hain.
+Website: eleganceantique.store
+Aapko store ke live products aur official policies yaad hain.
 
-Rules:
-1. Jab customer koi product lene ko kahe, to foran 'addToCart' tool call karein us product ki variantId ke sath.
-2. Jab customer bole checkout ya buy now, to 'goToCheckout' tool call karein.`;
+CUSTOMER POLICIES & FAQS (Zaroori Maloomat):
+1. Cash on Delivery (COD):
+   - Haan, COD poore Pakistan mein available hai.
+   - COD par delivery charges **Rs. 300** hain.
+2. Free Delivery Offer (Advance Payment):
+   - Agar customer Bank Transfer / Advance payment kare, to delivery **100% FREE** hai! (No shipping charges).
+   - Bank details: UBL Bank, Account Title: Rashid, Account No: 2914390683023.
+3. Delivery Time:
+   - Poore Pakistan mein **3 se 5 working days** mein safe delivery ho jaati hai.
+4. Warranty & Damage Protection:
+   - Hum safe multi-layer bubble packing karte hain. Agar transit mein mirror ya box ko koi nuqsaan pohnche, to unboxing video ke sath **100% Free Replacement** warranty milti hai.
+5. Quality & Material:
+   - Mirrors: Premium LED with touch-sensor and color temperature adjustment.
+   - Watch Boxes: High-grade solid wood with velvet interior and glass/wood top.
 
-    const chat = model.startChat({
-      history: [
-        { role: "user", parts: [{ text: systemPrompt }] },
-        { role: "model", parts: [{ text: "Understood! Main Elegance Antique ka sales assistant hoon." }] }
-      ]
-    });
+GUIDELINES:
+- Jab customer policy/shipping/delivery/warranty pooche, to foran upar diye gaye points me se to-the-point aur short Roman Urdu ya English me answer dein.
+- Jab customer kisi product ke baare me pooche, to polite aur short answer dein (1-2 sentences).
+- Hamesha friendly, respectful aur trust build karne waale andaz me baat karein.`;
 
-    const result = await chat.sendMessage(message);
-    const response = result.response;
-    const functionCalls = response.functionCalls();
-
+    const modelsToTry = [process.env.GEMINI_MODEL || "gemini-3.6-flash", "gemini-3.5-flash"];
     let replyText = "";
-    try {
-      replyText = response.text() || "";
-    } catch {
-      replyText = "";
+    let lastError = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const chat = model.startChat({
+          history: [
+            { role: "user", parts: [{ text: systemPrompt }] },
+            { role: "model", parts: [{ text: "Understood! Main Elegance Antique ka AI shopping assistant hoon. Main store ki accurate policies (COD, Free Shipping, 3-5 days delivery, Warranty) aur products ki sahi maloomat doonga." }] }
+          ]
+        });
+
+        const result = await chat.sendMessage(message);
+        replyText = result.response.text();
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`Model ${modelName} error, trying fallback:`, err.message);
+      }
+    }
+
+    if (!replyText && lastError) {
+      throw lastError;
     }
 
     res.json({
-      text: replyText,
-      functionCalls: functionCalls || []
+      text: replyText.trim()
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Chat Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+module.exports = app;
